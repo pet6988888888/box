@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dark Mode Voice Breather</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js" type="module"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js" type="module"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js" type="module"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        
+        /* Dark Theme Colors */
+        :root {
+            --bg-dark: #1f2937; /* Dark Gray */
+            --text-light: #f3f4f6; /* Light Gray */
+            --primary-color: #4f46e5; /* Indigo-600 for base/empty state */
+            --secondary-color: #10b981; /* Emerald-500 for expanded/full state */
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 16px;
+        }
+
+        .breather-container {
+            width: 100%;
+            max-width: 400px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+
+        .breather-circle {
+            width: 200px;
+            height: 200px;
+            background: var(--primary-color);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-light);
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 2rem;
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.4);
+            /* Transition time is dynamically set in JS based on phase duration */
+            transition: all 0.4s ease-in-out; 
+        }
+
+        /* Inhale state: Circle expands, color changes to secondary */
+        .inhale {
+            transform: scale(1.4);
+            background: var(--secondary-color);
+            box-shadow: 0 0 50px var(--secondary-color); /* Bright glow */
+        }
+        /* Hold state (full): Circle remains large, color remains secondary */
+        .hold-full {
+            transform: scale(1.4);
+            background: var(--secondary-color);
+            box-shadow: 0 0 50px var(--secondary-color);
+        }
+        /* Exhale state: Circle contracts, color returns to primary */
+        .exhale {
+            transform: scale(1);
+            background: var(--primary-color);
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.4);
+        }
+        /* Hold state (empty): Circle remains small, color remains primary */
+        .hold-empty {
+            transform: scale(1);
+            background: var(--primary-color);
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.4);
+        }
+
+        .action-button {
+            padding: 12px 32px;
+            background-color: var(--primary-color);
+            color: var(--text-light);
+            font-weight: 600;
+            border-radius: 9999px;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.1s, box-shadow 0.3s;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+            min-width: 200px; /* Ensure button width is sufficient */
+        }
+
+        .action-button:hover {
+            background-color: #6366f1; /* Indigo-500 hover */
+        }
+        .action-button:active {
+            transform: scale(0.98);
+        }
+
+        .stop-button {
+            background-color: #dc2626 !important; /* Red-600 */
+        }
+        .stop-button:hover {
+            background-color: #ef4444 !important; /* Red-500 hover */
+        }
+
+        #tts-status {
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+            color: #ef4444; /* Tailwind red-500 */
+        }
+        
+        .session-input, .voice-select, .duration-input {
+            color: var(--secondary-color);
+            background-color: #111827; /* Darker bg for input/select */
+            border: 1px solid #374151;
+            width: 100%;
+            text-align: center;
+            padding: 8px;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+        
+        /* Style for disabled inputs */
+        .session-input:disabled, .voice-select:disabled, .duration-input:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            border-color: #374151; /* gray-700 */
+        }
+
+        .duration-group {
+            display: flex;
+            gap: 8px;
+            justify-content: space-between;
+        }
+
+        .duration-group > div {
+            flex: 1;
+            min-width: 70px; /* Ensure inputs don't become too small on mobile */
+        }
+        
+        .duration-label {
+            font-size: 0.75rem; /* text-xs */
+            font-weight: 500;
+            text-transform: uppercase;
+            color: #9ca3af; /* gray-400 */
+            margin-bottom: 4px;
+            display: block;
+        }
+
+        .session-input:focus, .voice-select:focus, .duration-input:focus {
+            outline: none;
+            border-color: var(--secondary-color);
+            box-shadow: 0 0 0 2px var(--secondary-color);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="breather-container">
+        <h1 class="text-4xl font-extrabold mb-8">Box Breather</h1>
+        
+        <!-- Breathing Phase Duration Pickers -->
+        <div class="mb-6 p-4 bg-gray-700/50 rounded-xl shadow-inner w-full max-w-xs">
+            <h2 class="block mb-4 font-semibold text-sm text-gray-300">Breathing Cycle (seconds):</h2>
+            <div class="duration-group">
+                <div>
+                    <span class="duration-label">Inhale</span>
+                    <input type="number" id="duration-inhale" value="4" min="1" class="duration-input text-lg transition duration-300">
+                </div>
+                <div>
+                    <span class="duration-label">Hold</span>
+                    <input type="number" id="duration-hold-full" value="4" min="0" class="duration-input text-lg transition duration-300">
+                </div>
+                <div>
+                    <span class="duration-label">Exhale</span>
+                    <input type="number" id="duration-exhale" value="4" min="1" class="duration-input text-lg transition duration-300">
+                </div>
+                <div>
+                    <span class="duration-label">Hold</span>
+                    <input type="number" id="duration-hold-empty" value="4" min="0" class="duration-input text-lg transition duration-300">
+                </div>
+            </div>
+        </div>
+
+        <!-- Session Duration Picker -->
+        <div class="mb-4 p-4 bg-gray-700/50 rounded-xl shadow-inner w-full max-w-xs">
+            <label for="session-minutes" class="block mb-2 font-semibold text-sm text-gray-300">Total Session (minutes):</label>
+            <input type="number" id="session-minutes" value="5" min="1" class="session-input text-xl font-bold transition duration-300">
+        </div>
+        
+        <!-- Voice Selector -->
+        <div class="mb-8 p-4 bg-gray-700/50 rounded-xl shadow-inner w-full max-w-xs">
+            <label for="voice-select" class="block mb-2 font-semibold text-sm text-gray-300">Select Voice:</label>
+            <select id="voice-select" class="voice-select appearance-none"></select>
+        </div>
+        
+        <div id="breathing-circle" class="breather-circle">
+            <span id="breathing-text">Ready</span>
+        </div>
+
+        <div id="countdown-display" class="mt-4 text-6xl font-extrabold text-white"></div>
+        
+        <!-- Session Timer Display -->
+        <div id="session-timer-display" class="mt-4 mb-8 text-xl font-semibold text-gray-300">Total Time: 05:00</div>
+        
+        <div id="tts-status" class="hidden"></div>
+
+        <button id="toggle-button" class="action-button">Start Breathing</button>
+    </div>
+
+    <script>
+        // --- Core Logic ---
+
+        const circle = document.getElementById('breathing-circle');
+        const breathingText = document.getElementById('breathing-text');
+        const toggleButton = document.getElementById('toggle-button');
+        const countdownDisplay = document.getElementById('countdown-display');
+        const ttsStatus = document.getElementById('tts-status');
+        const sessionMinutesInput = document.getElementById('session-minutes');
+        const sessionTimerDisplay = document.getElementById('session-timer-display');
+        const voiceSelect = document.getElementById('voice-select');
+        
+        // Duration Inputs
+        const durationInhaleInput = document.getElementById('duration-inhale');
+        const durationHoldFullInput = document.getElementById('duration-hold-full');
+        const durationExhaleInput = document.getElementById('duration-exhale');
+        const durationHoldEmptyInput = document.getElementById('duration-hold-empty');
+
+
+        let intervalId = null; // Breathing cycle interval
+        let sessionTimerId = null; // Session timer interval
+        let countdownIntervalId = null; // Countdown interval
+        let isRunning = false;
+        let phaseIndex = 0;
+        let timeRemaining = 0;
+        
+        // Dynamic Phases Structure - populated in startBreathing
+        let phases = []; 
+
+        // Session timing variables
+        let totalSessionSeconds = 0;
+        let sessionSecondsRemaining = 0;
+        
+        // --- Utility Functions ---
+
+        function formatTime(totalSeconds) {
+            const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+            const seconds = String(totalSeconds % 60).padStart(2, '0');
+            return `${minutes}:${seconds}`;
+        }
+
+        // --- Text-to-Speech (TTS) Setup ---
+        const speaker = window.speechSynthesis;
+        let selectedVoice = null;
+        let ttsReady = false;
+        let ttsChecked = false;
+
+        function checkVoiceStatus() {
+            if (ttsReady && ttsChecked) return;
+
+            const voices = speaker.getVoices();
+            ttsChecked = true; 
+
+            if (voices.length === 0) {
+                ttsStatus.textContent = 'Voice unavailable. Follow the visual guide.';
+                ttsStatus.classList.remove('hidden');
+                return;
+            }
+
+            // Filter for English voices and populate the selector
+            const englishVoices = voices.filter(v => v.lang.startsWith("en-"));
+            
+            // Clear previous options
+            voiceSelect.innerHTML = ''; 
+
+            englishVoices.forEach(voice => {
+                const option = document.createElement('option');
+                option.textContent = `${voice.name} (${voice.lang})`;
+                option.value = voice.name;
+                voiceSelect.appendChild(option);
+            });
+
+            // Set the initially selected voice (default to the first available)
+            const defaultVoiceName = englishVoices[0] ? englishVoices[0].name : '';
+            if (defaultVoiceName) {
+                voiceSelect.value = defaultVoiceName;
+                selectedVoice = englishVoices.find(v => v.name === defaultVoiceName);
+                ttsReady = true;
+                ttsStatus.classList.add('hidden');
+            } else {
+                 ttsStatus.textContent = 'No English voices found. Using first available voice.';
+                 selectedVoice = voices[0];
+                 ttsReady = true;
+                 ttsStatus.classList.remove('hidden');
+            }
+        }
+
+        // Listen for when voices are loaded by the browser
+        if (speaker.onvoiceschanged !== undefined) {
+            speaker.onvoiceschanged = checkVoiceStatus;
+        }
+        checkVoiceStatus(); // Initial check on load
+
+        // Listener for voice selection change
+        voiceSelect.addEventListener('change', () => {
+            const voices = speaker.getVoices();
+            selectedVoice = voices.find(v => v.name === voiceSelect.value);
+            // Test the new voice
+            speak("Voice selected.");
+        });
+
+        function speak(text) {
+            if (!ttsReady) {
+                checkVoiceStatus();
+            }
+
+            if (!ttsReady || !selectedVoice) {
+                return;
+            }
+
+            if (speaker.speaking) {
+                speaker.cancel();
+            }
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.voice = selectedVoice;
+            utterance.rate = 0.9; 
+            utterance.pitch = 1.0;
+            speaker.speak(utterance);
+        }
+        // --- End TTS Setup ---
+
+        // --- Breathing Cycle Logic ---
+
+        function updateDisplay() {
+            if (phases.length === 0) return;
+
+            const currentPhase = phases[phaseIndex];
+
+            // 1. Update Visuals
+            circle.className = `breather-circle ${currentPhase.class}`;
+            breathingText.textContent = currentPhase.name;
+            countdownDisplay.textContent = timeRemaining;
+            
+            // Adjust CSS transition to match the duration dynamically
+            circle.style.transitionDuration = `${currentPhase.duration}s`;
+        }
+
+        function nextPhase() {
+            if (phases.length === 0) return;
+
+            // Move to the next phase in the loop (0 -> 1 -> 2 -> 3 -> 0...)
+            phaseIndex = (phaseIndex + 1) % phases.length;
+            timeRemaining = phases[phaseIndex].duration;
+
+            // If the duration is 0, skip this phase
+            if (timeRemaining === 0) {
+                return nextPhase();
+            }
+
+            // Speak the prompt for the new phase
+            speak(phases[phaseIndex].prompt);
+            updateDisplay();
+        }
+
+        function tick() {
+            if (!isRunning) return;
+
+            timeRemaining--;
+            updateDisplay();
+
+            if (timeRemaining <= 0) {
+                nextPhase();
+            }
+        }
+        
+        // --- Session Timer Logic ---
+
+        function sessionTick() {
+            if (!isRunning) return;
+
+            sessionSecondsRemaining--;
+            sessionTimerDisplay.textContent = `Total Time: ${formatTime(sessionSecondsRemaining)}`;
+
+            if (sessionSecondsRemaining <= 0) {
+                stopBreathing(true); // Stop the session when time runs out
+            }
+        }
+
+        function startSessionTimer(minutes) {
+            totalSessionSeconds = minutes * 60;
+            sessionSecondsRemaining = totalSessionSeconds;
+            sessionTimerDisplay.textContent = `Total Time: ${formatTime(sessionSecondsRemaining)}`;
+            sessionTimerId = setInterval(sessionTick, 1000);
+        }
+
+        // --- Control Functions ---
+        
+        function setInputsDisabled(isDisabled) {
+            durationInhaleInput.disabled = isDisabled;
+            durationHoldFullInput.disabled = isDisabled;
+            durationExhaleInput.disabled = isDisabled;
+            durationHoldEmptyInput.disabled = isDisabled;
+            sessionMinutesInput.disabled = isDisabled;
+            voiceSelect.disabled = isDisabled;
+        }
+
+        function startBreathing() {
+            if (isRunning) return;
+            
+            // 1. Validation and load custom breathing durations
+            const dInhale = parseInt(durationInhaleInput.value, 10);
+            const dHoldFull = parseInt(durationHoldFullInput.value, 10);
+            const dExhale = parseInt(durationExhaleInput.value, 10);
+            const dHoldEmpty = parseInt(durationHoldEmptyInput.value, 10);
+
+            if (isNaN(dInhale) || dInhale < 1 || isNaN(dExhale) || dExhale < 1) {
+                 ttsStatus.textContent = 'Inhale and Exhale must be 1 second or more.';
+                 ttsStatus.classList.remove('hidden');
+                 return;
+            }
+
+            // Define dynamic phases
+            phases = [
+                { name: "INHALE", class: "inhale", prompt: "Inhale", duration: dInhale },
+                { name: "HOLD (FULL)", class: "hold-full", prompt: "Hold", duration: dHoldFull },
+                { name: "EXHALE", class: "exhale", prompt: "Exhale", duration: dExhale },
+                { name: "HOLD (EMPTY)", class: "hold-empty", prompt: "Hold", duration: dHoldEmpty },
+            ].filter(phase => phase.duration > 0); // Remove phases with 0 duration (e.g., for 4-7-8)
+
+            if (phases.length === 0) {
+                 ttsStatus.textContent = 'At least one phase must have a duration greater than zero.';
+                 ttsStatus.classList.remove('hidden');
+                 return;
+            }
+
+
+            // 2. Validate and start session timer
+            const minutes = parseInt(sessionMinutesInput.value, 10);
+            if (isNaN(minutes) || minutes < 1) {
+                ttsStatus.textContent = 'Please enter a valid session duration (1 minute minimum).';
+                ttsStatus.classList.remove('hidden');
+                return;
+            }
+            ttsStatus.classList.add('hidden');
+
+            // 3. Setup UI and start greetings
+            checkVoiceStatus(); 
+
+            // Personalized Start Greeting
+            speak("Welcome Hettie. Ready to relax? Let’s Go"); // UPDATED GREETING
+
+            isRunning = true;
+            toggleButton.textContent = 'STOP';
+            toggleButton.classList.remove('action-button');
+            toggleButton.classList.add('action-button', 'stop-button');
+            
+            // Disable duration/session/voice inputs while running
+            setInputsDisabled(true);
+            
+            // Start session timer immediately
+            startSessionTimer(minutes);
+
+            // --- 5 Second Countdown Logic ---
+            const countdownSeconds = 5;
+            const initialDelayMs = countdownSeconds * 1000;
+            let count = countdownSeconds;
+
+            // Initial UI state for countdown
+            breathingText.textContent = "Get Ready...";
+            countdownDisplay.textContent = count;
+            
+            // Start visual countdown loop (ticks from 4 down to 1)
+            countdownIntervalId = setInterval(() => {
+                count--;
+                countdownDisplay.textContent = count > 0 ? count : '';
+                
+                if (count === 0) {
+                    clearInterval(countdownIntervalId);
+                    countdownIntervalId = null;
+                }
+            }, 1000);
+
+            // Start the actual breathing cycle after the countdown
+            setTimeout(() => {
+                // Initialize first phase logic
+                if (isRunning) { // Check if user hasn't pressed STOP during the countdown
+                    phaseIndex = phases.length - 1; 
+                    nextPhase();
+
+                    // Set up the breathing interval
+                    intervalId = setInterval(tick, 1000);
+                }
+            }, initialDelayMs);
+            // --- End 5 Second Countdown Logic ---
+        }
+
+        function stopBreathing(completed = false) {
+            // Check if we are mid-greeting countdown or mid-breathing cycle
+            if (!isRunning && !countdownIntervalId) return;
+
+            isRunning = false;
+            
+            // Clear all intervals
+            clearInterval(intervalId);
+            intervalId = null;
+            clearInterval(sessionTimerId);
+            sessionTimerId = null;
+            clearInterval(countdownIntervalId);
+            countdownIntervalId = null;
+            
+            speaker.cancel(); // Stop current speech
+
+            // Reset UI
+            toggleButton.textContent = 'Start Breathing';
+            toggleButton.classList.remove('stop-button');
+            toggleButton.style.backgroundColor = 'var(--primary-color)';
+            breathingText.textContent = completed ? 'Session Complete!' : 'Ready';
+            countdownDisplay.textContent = '';
+            circle.className = 'breather-circle';
+            // Reset transition duration to default for smooth start next time
+            circle.style.transitionDuration = '0.4s'; 
+
+            // Re-enable inputs
+            setInputsDisabled(false);
+
+            if (completed) {
+                 sessionTimerDisplay.textContent = 'Total Time: 00:00';
+                 // Personalized End Greeting
+                 speak("Well done Hettie, I hope you are feeling more relax now.");
+            } else {
+                 // Reset the session display if manually stopped
+                 const minutes = parseInt(sessionMinutesInput.value, 10) || 5;
+                 sessionTimerDisplay.textContent = `Total Time: ${formatTime(minutes * 60)}`;
+            }
+        }
+
+        // --- Initialization ---
+
+        // Event Listener
+        toggleButton.addEventListener('click', () => {
+            if (isRunning || countdownIntervalId) { // Allow stopping even during countdown
+                stopBreathing(false);
+            } else {
+                startBreathing();
+            }
+        });
+
+        // Initialize button color and timer display
+        toggleButton.style.backgroundColor = 'var(--primary-color)';
+        sessionTimerDisplay.textContent = `Total Time: ${formatTime(5 * 60)}`; // Initial value set to 5 minutes
+    </script>
+</body>
+</html>
+
+
