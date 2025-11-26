@@ -454,7 +454,7 @@
             checkVoiceStatus(); 
 
             // Personalized Start Greeting
-            speak("Welcome Hettie. Ready to relax? Let’s Go"); // UPDATED GREETING
+            speak("Welcome. Ready to relax? Let’s Go"); // UPDATED GREETING
 
             isRunning = true;
             toggleButton.textContent = 'STOP';
@@ -533,7 +533,7 @@
             if (completed) {
                  sessionTimerDisplay.textContent = 'Total Time: 00:00';
                  // Personalized End Greeting
-                 speak("Well done Hettie, I hope you are feeling more relax now.");
+                 speak("Well done, I hope you are feeling more relax now.");
             } else {
                  // Reset the session display if manually stopped
                  const minutes = parseInt(sessionMinutesInput.value, 10) || 5;
@@ -558,5 +558,6 @@
     </script>
 </body>
 </html>
+
 
 
